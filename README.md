@@ -88,6 +88,7 @@ RL/
 │   └── figures/                       # Library of 29 full-dataset diagnostic charts covering all 30 research dimensions
 │
 └── Phase_1/                           # Phase 1 Comprehensive Documentation & Figures
+    ├── ARCHITECTURE.md                # Layer-by-layer neural math specifications, MDP formulation & Mermaid flowcharts
     ├── DEMO_RUN.md                    # Initial 200-sample prototyping demonstration results
     ├── FULL_RUN.md                    # Converged 5-epoch scientific run & 8-figure dashboard
     ├── ABLATIONS.md                   # Definitive ablation study, heatmaps, hardware benchmarks & failure cases

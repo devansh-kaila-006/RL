@@ -82,6 +82,11 @@ RL/
 │   ├── adaframe_checkpoint_*.pth      # Trained & verified PyTorch parameter weights
 │   └── splits/                        # Official UCF-101 Train/Test taxonomy mappings
 │
+├── EDA/                               # Extensive Exploratory Data Analysis Suite
+│   ├── EDA_REPORT.md                  # Comprehensive statistical analysis & hypothesis testing
+│   ├── run_dataset_eda.py             # Native OpenCV/NumPy analytical scanning pipeline
+│   └── figures/                       # High-resolution dataset distribution and entropy charts
+│
 └── Phase_1/                           # Phase 1 Comprehensive Documentation & Figures
     ├── DEMO_RUN.md                    # Initial 200-sample prototyping demonstration results
     ├── FULL_RUN.md                    # Converged 5-epoch scientific run & 8-figure dashboard

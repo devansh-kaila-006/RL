@@ -82,11 +82,10 @@ RL/
 │   ├── adaframe_checkpoint_*.pth      # Trained & verified PyTorch parameter weights
 │   └── splits/                        # Official UCF-101 Train/Test taxonomy mappings
 │
-├── EDA/                               # Extensive 20-Dimension Exploratory Data Analysis Suite
-│   ├── EDA_REPORT.md                  # Comprehensive statistical analysis across all 20 dimensions
-│   ├── run_dataset_eda.py             # Core taxonomy, temporal duration & entropy scanner
-│   ├── run_advanced_eda_suite.py      # Advanced physical, semantic & RL theoretical landscape modeling
-│   └── figures/                       # Library of 19 high-resolution diagnostic diagnostic charts
+├── EDA/                               # Exhaustive Full 101-Class Empirical EDA Suite
+│   ├── EDA_REPORT.md                  # Comprehensive empirical analysis across all 101 classes & 13,320 videos
+│   ├── run_full_ucf101_eda.py         # Complete dataset OpenCV telemetry and statistical scanning engine
+│   └── figures/                       # Library of 7 full-dataset diagnostic charts across all 101 categories
 │
 └── Phase_1/                           # Phase 1 Comprehensive Documentation & Figures
     ├── DEMO_RUN.md                    # Initial 200-sample prototyping demonstration results

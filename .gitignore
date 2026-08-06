@@ -1,0 +1,24 @@
+# Ignore high-volume video datasets and compression archives
+data/
+*.avi
+*.mp4
+*.mkv
+*.rar
+*.zip
+*.tar
+*.gz
+
+# Ignore trained checkpoints and tensor logs
+*.pt
+*.pth
+*.ckpt
+logs/
+runs/
+
+# Python cache and environments
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+env/
+.ipynb_checkpoints/

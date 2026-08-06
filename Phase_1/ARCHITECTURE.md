@@ -15,25 +15,36 @@ Traditional computer vision recognition models evaluate video sequences exhausti
 
 ## II. System Topology & Information Flow Pipeline
 
-```mermaid
-graph TD
-    classDef memory fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff;
-    classDef policy fill:#0f766e,stroke:#10b981,stroke-width:2px,color:#fff;
-    classDef vision fill:#4338ca,stroke:#8b5cf6,stroke-width:2px,color:#fff;
-    classDef action fill:#b45309,stroke:#f59e0b,stroke-width:2px,color:#fff;
+![AdaFrame-RL System Topology and Pipeline](figures/architecture_pipeline.png)
 
-    A["Raw Video Sequence<br/>V(t) at 25 FPS"] -->|Sample Frame Index t| B["Spatial Downsampling & RGB Norm<br/>112x112x3 Matrix"]
-    B --> C["Convolutional Backbone<br/>MobileNetV2 Feature Extractor"]:::vision
-    C -->|Spatial Embedding e(t) in R^1280| D["Temporal Recurrent Memory Cell<br/>Gated Recurrent Unit (GRU)"]:::memory
-    D <-->|Hidden Context State h(t-1)| D
-    D -->|Updated State h(t) in R^256| E{"Dual Neural Branching Head"}
-    
-    E -->|Classification Branch| F["Action Classifier Head<br/>Linear Projection in R^101"]:::vision
-    F -->|Cross-Entropy Logits| G["Action Recognition Identity<br/>e.g., CricketBowling / PushUps"]
-    
-    E -->|Reinforcement Policy Branch| H["Deep Q-Network (DQN) Head<br/>Q-Value Estimator in R^4"]:::policy
-    H -->|Epsilon-Greedy / Argmax| I["Temporal Hop Action Selection<br/>A(t) in {1, 2, 4, 8} Frames"]:::action
-    I -->|Next Evaluation Frame Index: t + A(t)| A
+### Structural Flow Diagram & Active Loop
+```
+===================================================================================================
+                        1. RAW VIDEO SEQUENCE  [V(t) at 25 FPS]
+                                          │
+                                          ▼  (Sample Frame Index t -> Norm 112x112x3)
+                        2. SPATIAL VISION BACKBONE  [MobileNetV2]
+                                          │
+                                          ▼  (Spatial Feature Embedding e(t) in R^1280)
+                        3. TEMPORAL RECURRENT CELL  [GRU Memory] ◄─── Context Loop h(t-1)
+                                          │
+                                          ▼  (Updated Temporal State h(t) in R^256)
+                                ┌─────────┴─────────┐
+             (Classification)   │                   │   (Policy Control)
+                                ▼                   ▼
+             4a. ACTION CLASSIFIER HEAD      4b. DQN POLICY HEAD
+                [Linear projection in R^101]    [MLP Estimator in R^4]
+                                │                   │
+                                ▼                   ▼
+                   Predict Action Identity      Select Temporal Hop Action
+                   (e.g., Cricket / PushUps)    A(t) in {1, 2, 4, 8} Frames
+                                                    │
+                                                    ▼
+                 ┌────────────────────────────────────────────────────────┐
+                 │ ACTIVE SKIP LOOP: Advance directly to Frame t + A(t)   │
+                 │ Bypassing & Eliminating Compute for Redundant Frames!  │
+                 └────────────────────────────────────────────────────────┘
+===================================================================================================
 ```
 
 ---

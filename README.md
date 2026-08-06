@@ -82,10 +82,10 @@ RL/
 │   ├── adaframe_checkpoint_*.pth      # Trained & verified PyTorch parameter weights
 │   └── splits/                        # Official UCF-101 Train/Test taxonomy mappings
 │
-├── EDA/                               # Exhaustive 13-Dimension Full 101-Class Empirical EDA Suite
-│   ├── EDA_REPORT.md                  # Complete empirical analysis across all 13 dimensions, 101 classes & 13,320 videos
-│   ├── run_full_ucf101_eda.py         # Native OpenCV telemetry and 13-Dimension mathematical modeling engine
-│   └── figures/                       # Library of 12 full-dataset diagnostic charts covering all 13 research dimensions
+├── EDA/                               # Exhaustive 30-Dimension Full 101-Class Empirical EDA Suite
+│   ├── EDA_REPORT.md                  # Complete empirical analysis across all 30 dimensions, 101 classes & 13,320 videos
+│   ├── run_full_ucf101_eda.py         # Native OpenCV telemetry and 30-Dimension mathematical modeling engine
+│   └── figures/                       # Library of 29 full-dataset diagnostic charts covering all 30 research dimensions
 │
 └── Phase_1/                           # Phase 1 Comprehensive Documentation & Figures
     ├── DEMO_RUN.md                    # Initial 200-sample prototyping demonstration results

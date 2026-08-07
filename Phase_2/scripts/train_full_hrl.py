@@ -21,12 +21,29 @@ def train_hrl(epochs=30, k_streams=32):
     # Create checkpoints directory
     os.makedirs("checkpoints", exist_ok=True)
     
-    print("\n[1] Initializing UCF-101 Dataset...")
+    print("\n[1] Initializing UCF-101 Dataset & Asynchronous Prefetch Queue...")
     dataset = UCF101Dataset(data_dir="data", split="train01", seq_len=150, allow_synthetic_fallback=True)
     print(f"Dataset Size: {len(dataset)} video sequences")
     
+    # Asynchronous DataLoader to completely eliminate CPU I/O bottlenecks!
+    dataloader = torch.utils.data.DataLoader(
+        dataset, 
+        batch_size=1, 
+        shuffle=True, 
+        num_workers=4, 
+        prefetch_factor=2, 
+        pin_memory=True
+    )
+    
+    def infinite_dataloader():
+        while True:
+            for batch in dataloader:
+                yield batch
+                
+    data_iterator = iter(infinite_dataloader())
+    
     print(f"\n[2] Initializing Manager & Worker Policies for {k_streams} Streams...")
-    synthesizer = MultiStreamSynthesizer(dataset, K_streams=k_streams, max_sequence_length=150)
+    synthesizer = MultiStreamSynthesizer(data_iterator, K_streams=k_streams, max_sequence_length=150)
     
     manager = ManagerPolicy(K_streams=k_streams).to(device)
     worker = WorkerAgent(num_classes=101).to(device)

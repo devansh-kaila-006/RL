@@ -9,8 +9,8 @@ class MultiStreamSynthesizer:
     When a video stream reaches its end, it automatically respawns with a new
     random video sequence from the dataset to mimic continuous 24/7 feeds.
     """
-    def __init__(self, dataset, K_streams=4, max_sequence_length=150):
-        self.dataset = dataset
+    def __init__(self, dataloader_iterator, K_streams=4, max_sequence_length=150):
+        self.iterator = dataloader_iterator
         self.K = K_streams
         self.max_len = max_sequence_length
         
@@ -18,19 +18,26 @@ class MultiStreamSynthesizer:
         self.stream_labels = [None] * self.K
         self.stream_pointers = [0] * self.K
         self.stream_lengths = [0] * self.K
-        self.dataset_idx = 0
         
         self._initialize_streams()
         
     def _initialize_streams(self):
-        """Populate initial K streams from dataset."""
+        """Populate initial K streams from the asynchronous queue."""
         for k in range(self.K):
             self._respawn_stream(k)
             
     def _respawn_stream(self, k):
-        """Fetch a new video from dataset and load into stream k."""
-        idx = np.random.randint(0, len(self.dataset))
-        video, label, _ = self.dataset[idx]
+        """Fetch a pre-decoded video from the background thread queue and load into stream k."""
+        try:
+            video, label, _ = next(self.iterator)
+        except StopIteration:
+            # Should not happen if the dataloader is wrapped in an infinite generator,
+            # but if it does, we just reset the iterator (handled externally or raise error).
+            raise RuntimeError("Dataloader Iterator ran out of data! Ensure it is wrapped in an infinite loop generator.")
+            
+        # The DataLoader returns a batched tensor (1, T, C, H, W) since we will configure it with batch_size=1
+        video = video.squeeze(0) # (T, C, H, W)
+        label = int(label.squeeze(0).item()) if isinstance(label, torch.Tensor) else label
         
         # Ensure it is bounded
         seq_len = min(video.shape[0], self.max_len)

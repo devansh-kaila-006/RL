@@ -30,7 +30,7 @@ class MultiStreamSynthesizer:
     def _respawn_stream(self, k):
         """Fetch a new video from dataset and load into stream k."""
         idx = np.random.randint(0, len(self.dataset))
-        video, label = self.dataset[idx]
+        video, label, _ = self.dataset[idx]
         
         # Ensure it is bounded
         seq_len = min(video.shape[0], self.max_len)

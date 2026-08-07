@@ -1,5 +1,6 @@
 import os
 import time
+import argparse
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -8,7 +9,7 @@ from src.hierarchical.stream_synthesizer import MultiStreamSynthesizer
 from src.hierarchical.manager_policy import ManagerPolicy
 from src.hierarchical.worker_agent import WorkerAgent
 
-def train_hrl(epochs=30, k_streams=32):
+def train_hrl(epochs=30, k_streams=32, resume_path=None):
     print("============================================================")
     print("Phase 2 H-RL Multi-Stream: Full Cloud GPU Training Loop")
     print("============================================================")
@@ -60,6 +61,17 @@ def train_hrl(epochs=30, k_streams=32):
     # The true worker agent instance for calling init_hidden and decode_action
     worker_base = worker.module if isinstance(worker, torch.nn.DataParallel) else worker
     
+    start_epoch = 1
+    if resume_path and os.path.exists(resume_path):
+        print(f"\n[!] Resuming from checkpoint: {resume_path}")
+        checkpoint = torch.load(resume_path, map_location=device)
+        manager.load_state_dict(checkpoint['manager_state_dict'])
+        worker.load_state_dict(checkpoint['worker_state_dict'])
+        manager_opt.load_state_dict(checkpoint['manager_opt_dict'])
+        worker_opt.load_state_dict(checkpoint['worker_opt_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        print(f"Successfully loaded weights! Resuming at Epoch {start_epoch}...")
+        
     h_worker = worker_base.init_hidden(batch_size=k_streams, device=device)
     prev_glimpses = [0] * k_streams
     
@@ -68,7 +80,7 @@ def train_hrl(epochs=30, k_streams=32):
     
     print(f"\n[3] Initiating Training for {epochs} Epochs ({MACRO_STEPS_PER_EPOCH} steps/epoch)...")
     
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, epochs + 1):
         print(f"\n--- Epoch {epoch}/{epochs} ---")
         start_time = time.time()
         
@@ -143,4 +155,10 @@ def train_hrl(epochs=30, k_streams=32):
         print(f"Epoch {epoch} Completed in {epoch_time:.2f}s! Checkpoint saved to {checkpoint_path}")
 
 if __name__ == "__main__":
-    train_hrl(epochs=30, k_streams=32)
+    parser = argparse.ArgumentParser(description="Phase 2 H-RL Multi-Stream GPU Training")
+    parser.add_argument("--epochs", type=int, default=30, help="Total epochs to train")
+    parser.add_argument("--k_streams", type=int, default=32, help="Number of concurrent streams")
+    parser.add_argument("--resume", type=str, default=None, help="Path to .pth checkpoint to resume from")
+    args = parser.parse_args()
+    
+    train_hrl(epochs=args.epochs, k_streams=args.k_streams, resume_path=args.resume)

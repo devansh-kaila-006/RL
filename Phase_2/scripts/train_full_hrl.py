@@ -9,7 +9,7 @@ from src.hierarchical.stream_synthesizer import MultiStreamSynthesizer
 from src.hierarchical.manager_policy import ManagerPolicy
 from src.hierarchical.worker_agent import WorkerAgent
 
-def train_hrl(epochs=30, k_streams=32, resume_path=None):
+def train_hrl(epochs=30, k_streams=16, resume_path=None):
     print("============================================================")
     print("Phase 2 H-RL Multi-Stream: Full Cloud GPU Training Loop")
     print("============================================================")
@@ -26,13 +26,14 @@ def train_hrl(epochs=30, k_streams=32, resume_path=None):
     dataset = UCF101Dataset(data_dir="data", split="train01", seq_len=150, allow_synthetic_fallback=True)
     print(f"Dataset Size: {len(dataset)} video sequences")
     
-    # Asynchronous DataLoader to completely eliminate CPU I/O bottlenecks!
+    # Asynchronous DataLoader (num_workers=0 on Windows to prevent freezing, 4 on Linux/Kaggle for speed)
+    safe_workers = 4 if os.name != 'nt' else 0
     dataloader = torch.utils.data.DataLoader(
         dataset, 
         batch_size=1, 
         shuffle=True, 
-        num_workers=4, 
-        prefetch_factor=2, 
+        num_workers=safe_workers, 
+        prefetch_factor=2 if safe_workers > 0 else None, 
         pin_memory=True
     )
     
@@ -157,7 +158,7 @@ def train_hrl(epochs=30, k_streams=32, resume_path=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Phase 2 H-RL Multi-Stream GPU Training")
     parser.add_argument("--epochs", type=int, default=30, help="Total epochs to train")
-    parser.add_argument("--k_streams", type=int, default=32, help="Number of concurrent streams")
+    parser.add_argument("--k_streams", type=int, default=16, help="Number of concurrent streams (16 for laptop GPU, 32 for Kaggle)")
     parser.add_argument("--resume", type=str, default=None, help="Path to .pth checkpoint to resume from")
     args = parser.parse_args()
     

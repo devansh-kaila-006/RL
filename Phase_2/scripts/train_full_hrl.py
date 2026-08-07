@@ -8,14 +8,15 @@ from src.hierarchical.stream_synthesizer import MultiStreamSynthesizer
 from src.hierarchical.manager_policy import ManagerPolicy
 from src.hierarchical.worker_agent import WorkerAgent
 
-def train_hrl(epochs=30, k_streams=4):
+def train_hrl(epochs=30, k_streams=32):
     print("============================================================")
     print("Phase 2 H-RL Multi-Stream: Full Cloud GPU Training Loop")
     print("============================================================")
     
     # Automatically select GPU if available (which it will be on Colab T4)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Accelerated Execution Device: {device.type.upper()}")
+    num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    print(f"Accelerated Execution Device: {device.type.upper()} ({num_gpus} GPUs detected)")
     
     # Create checkpoints directory
     os.makedirs("checkpoints", exist_ok=True)
@@ -24,19 +25,28 @@ def train_hrl(epochs=30, k_streams=4):
     dataset = UCF101Dataset(data_dir="data", split="train01", seq_len=150, allow_synthetic_fallback=True)
     print(f"Dataset Size: {len(dataset)} video sequences")
     
-    print("\n[2] Initializing Manager & Worker Policies...")
+    print(f"\n[2] Initializing Manager & Worker Policies for {k_streams} Streams...")
     synthesizer = MultiStreamSynthesizer(dataset, K_streams=k_streams, max_sequence_length=150)
+    
     manager = ManagerPolicy(K_streams=k_streams).to(device)
     worker = WorkerAgent(num_classes=101).to(device)
+    
+    # Dual-GPU / Multi-GPU Optimization!
+    if num_gpus > 1:
+        print(f"Optimizing workloads across {num_gpus} GPUs using DataParallel...")
+        manager = torch.nn.DataParallel(manager)
+        worker = torch.nn.DataParallel(worker)
     
     manager_opt = optim.Adam(manager.parameters(), lr=1e-4)
     worker_opt = optim.Adam(worker.parameters(), lr=1e-4)
     
-    h_worker = worker.init_hidden(batch_size=k_streams, device=device)
+    # The true worker agent instance for calling init_hidden and decode_action
+    worker_base = worker.module if isinstance(worker, torch.nn.DataParallel) else worker
+    
+    h_worker = worker_base.init_hidden(batch_size=k_streams, device=device)
     prev_glimpses = [0] * k_streams
     
     # Calculate how many macro-steps approximate a full epoch
-    # (Number of videos / Streams) * Avg Steps per Video
     MACRO_STEPS_PER_EPOCH = int((len(dataset) / k_streams) * 37)
     
     print(f"\n[3] Initiating Training for {epochs} Epochs ({MACRO_STEPS_PER_EPOCH} steps/epoch)...")
@@ -59,40 +69,43 @@ def train_hrl(epochs=30, k_streams=4):
             entropies = entropies.to(device).unsqueeze(0)
             labels = torch.tensor(labels, dtype=torch.long, device=device)
             
-            budgets = manager.allocate_discrete_budgets(entropies, max_total_budget=20)
+            # If wrapped in DataParallel, we still pass entropies.
+            budgets = manager(entropies)
+            # Depending on if DataParallel split the batch, we handle discrete conversion
+            budgets = (budgets * 20).floor().long()
+            budgets = torch.clamp(budgets, min=1)
             
-            # --- WORKER PHASE ---
+            # --- WORKER PHASE (VECTORIZED BATCH EXECUTION) ---
+            # Instead of a Python for loop, we process all 32 streams simultaneously on the GPU!
+            h_worker = h_worker.detach()
+            glimpse_tensor = torch.tensor(prev_glimpses, dtype=torch.long, device=device)
+            
+            h_new, logits, q_values = worker(frames, h_worker, glimpse_tensor)
+            h_worker = h_new
+            
+            # Cross-Entropy Classification Loss (Vectorized)
+            loss_cls = F.cross_entropy(logits, labels)
+            
+            # Q-learning Target Decoding
+            action_indices = torch.argmax(q_values, dim=-1)
+            
             hop_actions = []
-            step_loss = 0.0
-            new_h_states = []
+            new_glimpses = []
             
+            # Decoding is lightweight enough for CPU loop, but network forward/backward was massively batched!
             for k in range(k_streams):
-                frame_k = frames[k:k+1]
-                h_k = h_worker[k:k+1].detach()
-                glimpse_k = prev_glimpses[k]
-                
-                h_new, logits, q_values = worker.forward_step(frame_k, h_k, glimpse_k)
-                new_h_states.append(h_new)
-                
-                # Cross-Entropy Classification Loss
-                loss_cls = F.cross_entropy(logits, labels[k:k+1])
-                step_loss += loss_cls
-                
-                # Q-learning Target
-                action_idx = torch.argmax(q_values, dim=-1).item()
-                hop, next_glimpse = worker.decode_action(action_idx)
-                
+                hop, next_glimpse = worker_base.decode_action(action_indices[k].item())
                 hop_actions.append(hop)
-                prev_glimpses[k] = next_glimpse
+                new_glimpses.append(next_glimpse)
                 
-            h_worker = torch.cat(new_h_states, dim=0)
+            prev_glimpses = new_glimpses
             
             # Backpropagate
-            step_loss.backward()
+            loss_cls.backward()
             worker_opt.step()
             manager_opt.step()
             
-            total_loss += step_loss.item()
+            total_loss += loss_cls.item()
             synthesizer.step_streams(hop_actions)
             
             if step % 250 == 0:
@@ -113,4 +126,4 @@ def train_hrl(epochs=30, k_streams=4):
         print(f"Epoch {epoch} Completed in {epoch_time:.2f}s! Checkpoint saved to {checkpoint_path}")
 
 if __name__ == "__main__":
-    train_hrl(epochs=30, k_streams=4)
+    train_hrl(epochs=30, k_streams=32)

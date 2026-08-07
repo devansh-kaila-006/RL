@@ -11,39 +11,44 @@ class SpatialGlimpseExtractor(nn.Module):
     def __init__(self):
         super().__init__()
         
-    def forward(self, frames, glimpse_idx):
+    def forward(self, frames, glimpse_indices):
         """
         frames: (B, 3, H, W)
-        glimpse_idx: int in [0, 5]
+        glimpse_indices: list or 1D tensor of B ints in [0, 5]
         """
         B, C, H, W = frames.shape
         crop_h, crop_w = H // 2, W // 2
         
-        # We process each item in the batch differently if necessary, 
-        # but for simplicity we assume the whole batch shares the same glimpse action
-        # during independent stream processing (batch size 1 per stream).
-        
-        if glimpse_idx == 0:
-            # Full Frame (Downsampled)
-            return F.interpolate(frames, size=(crop_h, crop_w), mode='bilinear', align_corners=False)
-        elif glimpse_idx == 1:
-            # Top-Left
-            return frames[:, :, :crop_h, :crop_w]
-        elif glimpse_idx == 2:
-            # Top-Right
-            return frames[:, :, :crop_h, crop_w:]
-        elif glimpse_idx == 3:
-            # Bottom-Left
-            return frames[:, :, crop_h:, :crop_w]
-        elif glimpse_idx == 4:
-            # Bottom-Right
-            return frames[:, :, crop_h:, crop_w:]
-        elif glimpse_idx == 5:
-            # Center Crop
-            ch_start, cw_start = H // 4, W // 4
-            return frames[:, :, ch_start:ch_start+crop_h, cw_start:cw_start+crop_w]
-        else:
-            raise ValueError(f"Invalid glimpse_idx {glimpse_idx}")
+        cropped_frames = []
+        for b in range(B):
+            g_idx = int(glimpse_indices[b])
+            frame = frames[b]
+            
+            if g_idx == 0:
+                # Full Frame (Downsampled)
+                crop = F.interpolate(frame.unsqueeze(0), size=(crop_h, crop_w), mode='bilinear', align_corners=False).squeeze(0)
+            elif g_idx == 1:
+                # Top-Left
+                crop = frame[:, :crop_h, :crop_w]
+            elif g_idx == 2:
+                # Top-Right
+                crop = frame[:, :crop_h, crop_w:]
+            elif g_idx == 3:
+                # Bottom-Left
+                crop = frame[:, crop_h:, :crop_w]
+            elif g_idx == 4:
+                # Bottom-Right
+                crop = frame[:, crop_h:, crop_w:]
+            elif g_idx == 5:
+                # Center Crop
+                ch_start, cw_start = H // 4, W // 4
+                crop = frame[:, ch_start:ch_start+crop_h, cw_start:cw_start+crop_w]
+            else:
+                raise ValueError(f"Invalid glimpse_idx {g_idx}")
+                
+            cropped_frames.append(crop)
+            
+        return torch.stack(cropped_frames, dim=0)
 
 class WorkerAgent(nn.Module):
     """
@@ -83,8 +88,8 @@ class WorkerAgent(nn.Module):
             nn.Linear(128, self.num_joint_actions)
         )
         
-    def extract_feature(self, frame_tensor, glimpse_idx):
-        cropped = self.glimpse_extractor(frame_tensor, glimpse_idx)
+    def extract_feature(self, frame_tensor, glimpse_indices):
+        cropped = self.glimpse_extractor(frame_tensor, glimpse_indices)
         feats = self.features(cropped)
         feats = self.pool(feats).view(cropped.size(0), -1)
         return F.relu(self.projection(feats))
@@ -92,15 +97,15 @@ class WorkerAgent(nn.Module):
     def init_hidden(self, batch_size, device):
         return torch.zeros(batch_size, self.hidden_dim, device=device)
         
-    def forward_step(self, frame_tensor, h_prev, glimpse_idx=0):
+    def forward(self, frame_tensor, h_prev, glimpse_indices):
         """
-        Executes a single step.
+        Executes a single step across a batch of streams simultaneously.
         Inputs:
             frame_tensor: (B, 3, H, W)
             h_prev: (B, hidden_dim)
-            glimpse_idx: The spatial action selected in the PREVIOUS step to crop current frame.
+            glimpse_indices: list/tensor of B spatial actions selected in the PREVIOUS step.
         """
-        feat = self.extract_feature(frame_tensor, glimpse_idx)
+        feat = self.extract_feature(frame_tensor, glimpse_indices)
         h_new = self.gru_cell(feat, h_prev)
         
         logits = self.classifier(h_new)

@@ -24,7 +24,8 @@ def evaluate_hrl(checkpoint_path, num_videos=100):
     dataset = UCF101Dataset(data_dir="data", split="test01", seq_len=150, allow_synthetic_fallback=True)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)
     
-    manager = ManagerPolicy(K_streams=1).to(device)
+    # Must match the K_streams used during training to successfully load the weights!
+    manager = ManagerPolicy(K_streams=16).to(device)
     worker = WorkerAgent(num_classes=101).to(device)
     
     checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -57,12 +58,13 @@ def evaluate_hrl(checkpoint_path, num_videos=100):
             label = label.to(device)
             T = video.size(1)
             
-            # Simulated Entropy for a single stream (In real-time, this comes from frame differencing)
-            entropy = torch.tensor([0.5], device=device).unsqueeze(0)
+            # Simulated Entropy for a single stream (Pad to 16 to match the trained Manager's input size)
+            entropy = torch.zeros(1, 16, device=device)
+            entropy[0, 0] = 0.5
             
             # [1] MANAGER POLICY: Allocate processing budget for this specific video
             budget_ratio = manager(entropy)
-            budget = (budget_ratio * 20).floor().long().clamp(min=1).item()
+            budget = (budget_ratio[0, 0] * 20).floor().long().clamp(min=1).item()
             
             h_worker = worker.init_hidden(batch_size=1, device=device)
             prev_glimpse = torch.tensor([0], dtype=torch.long, device=device)

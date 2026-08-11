@@ -13,7 +13,7 @@ from src.hierarchical.worker_agent import WorkerAgent
 
 def evaluate_hrl(checkpoint_path, num_videos=100):
     print("============================================================")
-    print("Phase 3 H-RL: Scientific Evaluation & Benchmarking")
+    print("Phase 2 H-RL: Demo Evaluation & Benchmarking")
     print("============================================================")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -119,7 +119,7 @@ def evaluate_hrl(checkpoint_path, num_videos=100):
     # ---------------------------------------------------------
     # PLOTTING METRICS
     # ---------------------------------------------------------
-    os.makedirs("Phase_3/results", exist_ok=True)
+    os.makedirs("Phase_2/results", exist_ok=True)
     
     # Plot 1: Compute Reduction Bar Chart
     plt.figure(figsize=(8, 6))
@@ -137,7 +137,7 @@ def evaluate_hrl(checkpoint_path, num_videos=100):
         plt.text(bar.get_x() + bar.get_width()/2, yval + (total_baseline_frames * 0.02), f'{int(yval):,}', va='bottom', ha='center', fontsize=11, fontweight='bold')
         
     plt.tight_layout()
-    plot_path = "Phase_3/results/compute_reduction_chart.png"
+    plot_path = "Phase_2/results/compute_reduction_chart.png"
     plt.savefig(plot_path, dpi=300)
     print(f"Saved Scientific Graph to: {plot_path}")
 

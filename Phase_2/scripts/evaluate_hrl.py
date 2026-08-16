@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import argparse
 import torch
@@ -6,6 +7,10 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from src.dataset import UCF101Dataset
 from src.hierarchical.manager_policy import ManagerPolicy

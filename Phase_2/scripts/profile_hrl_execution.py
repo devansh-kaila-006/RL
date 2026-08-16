@@ -1,7 +1,13 @@
 import os
+import sys
 import time
 import torch
 import psutil
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from src.dataset import UCF101Dataset
 from src.hierarchical.stream_synthesizer import MultiStreamSynthesizer
 from src.hierarchical.manager_policy import ManagerPolicy

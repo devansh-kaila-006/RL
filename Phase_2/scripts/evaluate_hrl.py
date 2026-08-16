@@ -58,9 +58,10 @@ def evaluate_hrl(checkpoint_path, num_videos=100):
             label = label.to(device)
             T = video.size(1)
             
-            # Simulated Entropy for a single stream (Pad to 16 to match the trained Manager's input size)
+            # Real spatial entropy (Standard deviation of pixel intensities, matching training phase)
             entropy = torch.zeros(1, 16, device=device)
-            entropy[0, 0] = 0.5
+            # The initial frame is frame 0
+            entropy[0, 0] = video[:, 0, :, :, :].float().std().item()
             
             # [1] MANAGER POLICY: Allocate processing budget for this specific video
             budget_ratio = manager(entropy)

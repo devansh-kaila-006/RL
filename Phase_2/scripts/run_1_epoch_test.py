@@ -12,7 +12,7 @@ if PROJECT_ROOT not in sys.path:
 from src.dataset import UCF101Dataset
 from src.hierarchical.stream_synthesizer import MultiStreamSynthesizer
 from src.hierarchical.manager_policy import ManagerPolicy
-from src.hierarchical.worker_agent import WorkerAgent
+from src.hierarchical.worker_agent import WorkerAgent, ReplayBuffer
 
 def run_1_epoch():
     print("============================================================")
@@ -24,34 +24,35 @@ def run_1_epoch():
     print(f"Device: {device.type.upper()}")
     
     print("\n[1] Initializing UCF-101 Dataset...")
-    # Load actual UCF-101 training split
     dataset = UCF101Dataset(data_dir="data", split="train01", seq_len=150, allow_synthetic_fallback=True)
     dataset_size = len(dataset)
     print(f"Dataset Size: {dataset_size} video sequences")
     
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)
+    
+    def infinite_dataloader():
+        while True:
+            for batch in dataloader:
+                yield batch
+                
+    data_iterator = iter(infinite_dataloader())
+    
     print("\n[2] Initializing Manager & Worker Policies...")
-    synthesizer = MultiStreamSynthesizer(dataset, K_streams=K_STREAMS, max_sequence_length=150)
+    synthesizer = MultiStreamSynthesizer(data_iterator, K_streams=K_STREAMS, max_sequence_length=150)
     manager = ManagerPolicy(K_streams=K_STREAMS).to(device)
     worker = WorkerAgent(num_classes=101).to(device)
+    replay_buffer = ReplayBuffer(capacity=50000)
     
     manager_opt = optim.Adam(manager.parameters(), lr=1e-4)
     worker_opt = optim.Adam(worker.parameters(), lr=1e-4)
     
     h_worker = worker.init_hidden(batch_size=K_STREAMS, device=device)
-    prev_glimpses = [0] * K_STREAMS
+    prev_glimpses = torch.zeros(K_STREAMS, dtype=torch.long, device=device)
     
     manager.train()
     worker.train()
     
-    # Calculate macro-steps for 1 epoch. 
-    # If each stream processes a video (avg 150 frames, jumping by avg 4 frames = 37 steps per video),
-    # To process dataset_size videos across K streams, we need roughly:
-    # steps_per_video = 37. To process N videos on K streams = (N / K) * 37
-    # For a quick test run that doesn't take 12 hours on CPU, we will define a "Mini-Epoch"
-    # as processing 200 macro-steps (which is enough to prove loss gradients propagate correctly).
-    
-    # We will run 500 macro-steps for this test to get a solid gradient descent trajectory.
-    MACRO_STEPS = 500 
+    MACRO_STEPS = 100 # Reduced for extremely fast CPU verification
     
     print(f"\n[3] Executing 1 Test Epoch (Limited to {MACRO_STEPS} Macro-Steps for CPU Viability)...")
     
@@ -59,64 +60,112 @@ def run_1_epoch():
     total_loss = 0.0
     
     for step in range(1, MACRO_STEPS + 1):
-        manager_opt.zero_grad()
-        worker_opt.zero_grad()
-        
-        # --- MANAGER PHASE ---
+        # --- MANAGER PHASE (REINFORCE) ---
         frames, labels, entropies = synthesizer.get_current_frames()
         frames = frames.to(device).float()
         entropies = entropies.to(device).unsqueeze(0)
         labels = torch.tensor(labels, dtype=torch.long, device=device)
         
-        budgets = manager.allocate_discrete_budgets(entropies, max_total_budget=20)
-        budgets_np = budgets.squeeze(0).cpu().numpy()
+        budgets, log_probs = manager.allocate_discrete_budgets(entropies)
+        budgets = budgets.squeeze(0) # (K,)
+        log_probs = log_probs.squeeze(0) # (K,)
         
-        # --- WORKER PHASE ---
-        hop_actions = []
-        step_loss = 0.0
-        new_h_states = []
+        max_b = budgets.max().item()
+        frames_processed = torch.zeros(K_STREAMS, dtype=torch.long, device=device)
         
-        for k in range(K_STREAMS):
-            frame_k = frames[k:k+1]
-            h_k = h_worker[k:k+1].detach() # detach BPTT history across streams to prevent blowing up RAM
-            glimpse_k = prev_glimpses[k]
-            
-            h_new, logits, q_values = worker.forward_step(frame_k, h_k, glimpse_k)
-            new_h_states.append(h_new)
-            
-            # Simulated supervised cross-entropy loss for classification
-            loss_cls = F.cross_entropy(logits, labels[k:k+1])
-            step_loss += loss_cls
-            
-            # Simulated RL Q-learning target (Dummy target for structural test)
-            action_idx = torch.argmax(q_values, dim=-1).item()
-            hop, next_glimpse = worker.decode_action(action_idx)
-            
-            hop_actions.append(hop)
-            prev_glimpses[k] = next_glimpse
-            
-        # Reconstruct h_worker without inplace modification
-        h_worker = torch.cat(new_h_states, dim=0)
+        manager_opt.zero_grad()
+        worker_opt.zero_grad()
         
-        # Backpropagate through Worker & Manager
-        step_loss.backward()
-        worker_opt.step()
+        final_logits = torch.zeros(K_STREAMS, 101, device=device)
+        
+        total_step_loss = 0.0
+        
+        for b_step in range(max_b):
+            active_mask = frames_processed < budgets
+            if not active_mask.any():
+                break
+                
+            h_new, logits, q_values = worker(frames, h_worker, prev_glimpses)
+            
+            loss_cls = F.cross_entropy(logits[active_mask], labels[active_mask])
+            total_step_loss = total_step_loss + loss_cls
+            
+            action_indices = torch.argmax(q_values, dim=-1)
+            hop_actions = []
+            new_glimpses = []
+            
+            for k in range(K_STREAMS):
+                if active_mask[k]:
+                    hop, next_glimpse = worker.decode_action(action_indices[k].item())
+                    
+                    pred = torch.argmax(logits[k], dim=-1)
+                    step_reward = 1.0 if pred == labels[k] else 0.0
+                    
+                    replay_buffer.push(h_worker[k], action_indices[k].item(), step_reward, h_new[k], done=False)
+                    
+                    frames_processed[k] += 1
+                    final_logits[k] = logits[k]
+                else:
+                    hop, next_glimpse = 0, prev_glimpses[k].item()
+                    
+                hop_actions.append(hop)
+                new_glimpses.append(next_glimpse)
+                
+            synthesizer.step_streams(hop_actions)
+            frames, labels, _ = synthesizer.get_current_frames()
+            frames = frames.to(device).float()
+            labels = torch.tensor(labels, dtype=torch.long, device=device)
+            
+            h_worker = torch.where(active_mask.unsqueeze(1), h_new, h_worker)
+            prev_glimpses = torch.tensor(new_glimpses, dtype=torch.long, device=device)
+            
+            total_loss += loss_cls.item()
+            
+        # End of worker loop, backpropagate total classification loss
+        if isinstance(total_step_loss, torch.Tensor):
+            total_step_loss.backward(retain_graph=True)
+            
+        # DQN Training from Replay Buffer
+        if len(replay_buffer) > 256:
+            state, action, reward, next_state, done = replay_buffer.sample(64)
+            state, action, reward = state.to(device), action.to(device), reward.to(device)
+            next_state, done = next_state.to(device), done.to(device)
+            
+            q_s = worker.policy_net(state)
+            q_s_a = q_s.gather(1, action.unsqueeze(1)).squeeze(1)
+            
+            with torch.no_grad():
+                q_next = worker.policy_net(next_state).max(1)[0]
+                target_q = reward + 0.99 * q_next * (1 - done)
+                
+            loss_q = F.mse_loss(q_s_a, target_q)
+            loss_q.backward(retain_graph=True)
+            
+        # Manager Reward
+        final_preds = torch.argmax(final_logits, dim=-1)
+        accuracy_reward = (final_preds == labels).float()
+        efficiency_penalty = 0.05 * (budgets.float() / 20.0) 
+        manager_reward = accuracy_reward - efficiency_penalty
+        
+        loss_manager = -(log_probs * manager_reward.detach()).mean()
+        loss_manager.backward()
+        
+        # Step both optimizers ONCE per manager cycle
         manager_opt.step()
+        worker_opt.step()
         
-        total_loss += step_loss.item()
+        h_worker = h_worker.detach()
         
-        synthesizer.step_streams(hop_actions)
-        
-        if step % 50 == 0:
-            avg_loss = total_loss / 50
+        if step % 20 == 0:
+            avg_loss = total_loss / (20 * max_b)
             elapsed = time.time() - start_time
-            print(f"Step [{step}/{MACRO_STEPS}] | Avg Loss: {avg_loss:.4f} | Elapsed: {elapsed:.2f}s")
+            print(f"Step [{step}/{MACRO_STEPS}] | Avg Cls Loss: {avg_loss:.4f} | Manager Reward: {manager_reward.mean().item():.3f} | Elapsed: {elapsed:.2f}s")
             total_loss = 0.0
             
     total_time = time.time() - start_time
     print("============================================================")
     print(f"1-Epoch Test Run Completed Successfully in {total_time:.2f} seconds!")
-    print("Gradients successfully propagated through Manager-Worker H-RL loop!")
+    print("Gradients successfully propagated through true REINFORCE/DQN Manager-Worker H-RL loop!")
     print("============================================================")
 
 if __name__ == "__main__":

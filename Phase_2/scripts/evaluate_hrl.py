@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
+# Insert Python path bootstrap (Fixes Issue 5)
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -69,8 +70,9 @@ def evaluate_hrl(checkpoint_path, num_videos=100):
             entropy[0, 0] = video[:, 0, :, :, :].float().std().item()
             
             # [1] MANAGER POLICY: Allocate processing budget for this specific video
-            budget_ratio = manager(entropy)
-            budget = (budget_ratio[0, 0] * 20).floor().long().clamp(min=1).item()
+            # Deterministic evaluation (argmax over categorical logits)
+            budgets, _ = manager.allocate_discrete_budgets(entropy, deterministic=True)
+            budget = budgets[0, 0].item()
             
             h_worker = worker.init_hidden(batch_size=1, device=device)
             prev_glimpse = torch.tensor([0], dtype=torch.long, device=device)

@@ -18,6 +18,7 @@ class MultiStreamSynthesizer:
         self.stream_labels = [None] * self.K
         self.stream_pointers = [0] * self.K
         self.stream_lengths = [0] * self.K
+        self.prev_frames = [None] * self.K
         
         self._initialize_streams()
         
@@ -29,11 +30,18 @@ class MultiStreamSynthesizer:
     def _respawn_stream(self, k):
         """Fetch a pre-decoded video from the background thread queue and load into stream k."""
         try:
-            video, label, _ = next(self.iterator)
+            batch = next(self.iterator)
         except StopIteration:
-            # Should not happen if the dataloader is wrapped in an infinite generator,
-            # but if it does, we just reset the iterator (handled externally or raise error).
             raise RuntimeError("Dataloader Iterator ran out of data! Ensure it is wrapped in an infinite loop generator.")
+            
+        # Handle tuple unpacking robustly (Fixes Issue 4)
+        if len(batch) == 2:
+            video, label = batch
+        elif len(batch) >= 3:
+            video, label = batch[0], batch[1]
+        else:
+            video = batch[0]
+            label = 0
             
         # The DataLoader returns a batched tensor (1, T, C, H, W) since we will configure it with batch_size=1
         video = video.squeeze(0) # (T, C, H, W)
@@ -45,6 +53,7 @@ class MultiStreamSynthesizer:
         self.stream_labels[k] = label
         self.stream_pointers[k] = 0
         self.stream_lengths[k] = seq_len
+        self.prev_frames[k] = None
         
     def get_current_frames(self):
         """
@@ -53,7 +62,6 @@ class MultiStreamSynthesizer:
             frames: (K, C, H, W) Tensor
             labels: list of K integer labels
             entropies: (K,) Tensor simulating visual motion complexity 
-                       (calculated roughly as spatial variance for budget purposes).
         """
         frames = []
         labels = []
@@ -65,9 +73,13 @@ class MultiStreamSynthesizer:
             frames.append(frame)
             labels.append(self.stream_labels[k])
             
-            # Simulated visual entropy: Standard deviation of pixel intensities
-            # In a real deployed system, this would be optical flow or consecutive frame difference.
-            entropy = frame.float().std().item()
+            # Motion entropy: Mean absolute difference from previous frame (Fixes Issue 11)
+            if self.prev_frames[k] is None:
+                entropy = 0.0
+            else:
+                entropy = torch.mean(torch.abs(frame.float() - self.prev_frames[k].float())).item()
+                
+            self.prev_frames[k] = frame
             entropies.append(entropy)
             
         return torch.stack(frames), labels, torch.tensor(entropies)

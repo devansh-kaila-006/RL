@@ -29,14 +29,18 @@ def run_profiler():
     
     # Load dataset (using 10 items for quick synthesis)
     dataset = UCF101Dataset(data_dir="data", split="train01", seq_len=150, allow_synthetic_fallback=True)
-    # Cache a small dataset in memory to avoid I/O bottlenecks during profiling
     print("Pre-fetching memory-cached surveillance clips to isolate Neural Network timing...")
     cached_dataset = []
     for i in range(10):
         video, label, _ = dataset[i]
-        cached_dataset.append((video, label))
+        cached_dataset.append((video, label, _))
         
-    synthesizer = MultiStreamSynthesizer(cached_dataset, K_streams=K_STREAMS, max_sequence_length=150)
+    def infinite_iter():
+        while True:
+            for x in cached_dataset:
+                yield x
+                
+    synthesizer = MultiStreamSynthesizer(infinite_iter(), K_streams=K_STREAMS, max_sequence_length=150)
     manager = ManagerPolicy(K_streams=K_STREAMS).to(device)
     worker = WorkerAgent(num_classes=101).to(device)
     
@@ -45,7 +49,7 @@ def run_profiler():
     worker.eval()
     
     h_worker = worker.init_hidden(batch_size=K_STREAMS, device=device)
-    prev_glimpses = [0] * K_STREAMS
+    prev_glimpses = torch.zeros(K_STREAMS, dtype=torch.long, device=device)
     
     print("\n2. Initiating Real-Time Execution Loop...")
     process = psutil.Process(os.getpid())
@@ -63,8 +67,8 @@ def run_profiler():
             frames = frames.to(device).float()
             entropies = entropies.to(device).unsqueeze(0)
             
-            # Manager assigns budgets (just executing forward pass for latency)
-            budgets = manager.allocate_discrete_budgets(entropies, max_total_budget=20)
+            # Manager assigns budgets
+            budgets, _ = manager.allocate_discrete_budgets(entropies, deterministic=True)
             budgets = budgets.squeeze(0).cpu().numpy()
             
             hop_actions = []
@@ -73,9 +77,9 @@ def run_profiler():
             for k in range(K_STREAMS):
                 frame_k = frames[k:k+1]
                 h_k = h_worker[k:k+1]
-                glimpse_k = prev_glimpses[k]
+                glimpse_k = prev_glimpses[k:k+1]
                 
-                h_new, logits, q_values = worker.forward_step(frame_k, h_k, glimpse_k)
+                h_new, logits, q_values = worker(frame_k, h_k, glimpse_k)
                 h_worker[k:k+1] = h_new
                 
                 action_idx = torch.argmax(q_values, dim=-1).item()
@@ -93,7 +97,6 @@ def run_profiler():
     mem_end = process.memory_info().rss / (1024 * 1024)
     
     elapsed = end_time - start_time
-    # Effective FPS includes the frames we vaulted over, showing the speedup of the algorithm!
     actual_fps = total_frames_processed / elapsed
     effective_fps = (total_frames_processed + total_frames_vaulted) / elapsed
     compute_reduction = (total_frames_vaulted / (total_frames_processed + total_frames_vaulted)) * 100
@@ -108,7 +111,7 @@ def run_profiler():
     print(f"Redundant Frames Vaulted:   {total_frames_vaulted}")
     print("-" * 60)
     print(f"System Actual FPS:          {actual_fps:.2f} FPS (NN pass limit)")
-    print(f"Effective Surveillance FPS: {effective_fps:.2f} FPS (Thanks to RL Vaulting!)")
+    print(f"Effective Surveillance FPS: {effective_fps:.2f} FPS (Estimated, thanks to RL Vaulting!)")
     print(f"End-to-End Compute Savings: {compute_reduction:.1f}% frames eliminated")
     print("-" * 60)
     print(f"RAM Memory Footprint Delta: +{mem_end - mem_start:.2f} MB")

@@ -2,53 +2,88 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+import random
+from collections import deque
+
+class ReplayBuffer:
+    def __init__(self, capacity=10000):
+        self.buffer = deque(maxlen=capacity)
+    
+    def push(self, state, action, reward, next_state, done):
+        """
+        Stores experience tuple.
+        state, next_state: (hidden_dim) tensor
+        action: int
+        reward: float
+        done: bool
+        """
+        self.buffer.append((state.detach(), action, reward, next_state.detach(), done))
+        
+    def sample(self, batch_size):
+        batch = random.sample(self.buffer, batch_size)
+        state, action, reward, next_state, done = zip(*batch)
+        state = torch.stack(state)
+        action = torch.tensor(action, dtype=torch.long)
+        reward = torch.tensor(reward, dtype=torch.float32)
+        next_state = torch.stack(next_state)
+        done = torch.tensor(done, dtype=torch.float32)
+        return state, action, reward, next_state, done
+    
+    def __len__(self):
+        return len(self.buffer)
 
 class SpatialGlimpseExtractor(nn.Module):
     """
     Given a batch of high-resolution frames (B, C, H, W), extracts a specific 
     spatial glimpse crop based on discrete action index, reducing pixel processing by 75%.
+    Vectorized using F.grid_sample for massive speedups at K=32.
     """
     def __init__(self):
         super().__init__()
+        # Precompute affine matrices for the 6 glimpse regions.
+        # Affine matrix format: [[sx, 0, tx], [0, sy, ty]]
+        # Coordinates in grid_sample are [-1, 1].
+        
+        # 0: Full Frame -> scale 1.0 (but we want to downsample to H/2, W/2, which grid_sample handles via output size)
+        full = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        # 1: TL -> scale 0.5 (zoom in 2x, so sx=0.5), tx=-0.5, ty=-0.5
+        tl = [[0.5, 0.0, -0.5], [0.0, 0.5, -0.5]]
+        # 2: TR
+        tr = [[0.5, 0.0, 0.5], [0.0, 0.5, -0.5]]
+        # 3: BL
+        bl = [[0.5, 0.0, -0.5], [0.0, 0.5, 0.5]]
+        # 4: BR
+        br = [[0.5, 0.0, 0.5], [0.0, 0.5, 0.5]]
+        # 5: Center
+        center = [[0.5, 0.0, 0.0], [0.0, 0.5, 0.0]]
+        
+        self.matrices = torch.tensor([full, tl, tr, bl, br, center], dtype=torch.float32)
         
     def forward(self, frames, glimpse_indices):
         """
         frames: (B, 3, H, W)
-        glimpse_indices: list or 1D tensor of B ints in [0, 5]
+        glimpse_indices: 1D tensor of B ints in [0, 5]
         """
         B, C, H, W = frames.shape
         crop_h, crop_w = H // 2, W // 2
         
-        cropped_frames = []
-        for b in range(B):
-            g_idx = int(glimpse_indices[b])
-            frame = frames[b]
+        device = frames.device
+        self.matrices = self.matrices.to(device)
+        
+        # Ensure glimpse_indices is a tensor and properly formatted (Fixes Issue 2)
+        if not isinstance(glimpse_indices, torch.Tensor):
+            glimpse_indices = torch.tensor(glimpse_indices, dtype=torch.long, device=device)
             
-            if g_idx == 0:
-                # Full Frame (Downsampled)
-                crop = F.interpolate(frame.unsqueeze(0), size=(crop_h, crop_w), mode='bilinear', align_corners=False).squeeze(0)
-            elif g_idx == 1:
-                # Top-Left
-                crop = frame[:, :crop_h, :crop_w]
-            elif g_idx == 2:
-                # Top-Right
-                crop = frame[:, :crop_h, crop_w:]
-            elif g_idx == 3:
-                # Bottom-Left
-                crop = frame[:, crop_h:, :crop_w]
-            elif g_idx == 4:
-                # Bottom-Right
-                crop = frame[:, crop_h:, crop_w:]
-            elif g_idx == 5:
-                # Center Crop
-                ch_start, cw_start = H // 4, W // 4
-                crop = frame[:, ch_start:ch_start+crop_h, cw_start:cw_start+crop_w]
-            else:
-                raise ValueError(f"Invalid glimpse_idx {g_idx}")
-                
-            cropped_frames.append(crop)
-            
-        return torch.stack(cropped_frames, dim=0)
+        glimpse_indices = glimpse_indices.view(-1)
+        
+        # Gather the specific affine matrix for each item in the batch
+        theta = self.matrices[glimpse_indices] # (B, 2, 3)
+        
+        # Generate the grid and sample
+        grid = F.affine_grid(theta, size=(B, C, crop_h, crop_w), align_corners=False)
+        cropped_frames = F.grid_sample(frames, grid, align_corners=False)
+        
+        return cropped_frames
 
 class WorkerAgent(nn.Module):
     """

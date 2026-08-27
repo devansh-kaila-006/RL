@@ -51,12 +51,12 @@ def evaluate_hrl(checkpoint_path, num_videos=100):
     total_processed_frames = 0
     
     start_time = time.time()
-    num_to_evaluate = min(num_videos, len(dataset))
+    num_to_evaluate = len(dataset) if num_videos == -1 else min(num_videos, len(dataset))
     print(f"\nEvaluating exactly {num_to_evaluate} videos from the Test Split...")
     
     with torch.no_grad():
         for i, (video, label, _) in enumerate(dataloader):
-            if i >= num_videos:
+            if num_videos != -1 and i >= num_videos:
                 break
                 
             video = video.to(device).float()
@@ -150,7 +150,7 @@ def evaluate_hrl(checkpoint_path, num_videos=100):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate H-RL Model Checkpoint")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to the .pth file")
-    parser.add_argument("--num_videos", type=int, default=100, help="Number of test videos to evaluate")
+    parser.add_argument("--num_videos", type=int, default=100, help="Number of test videos to evaluate (use -1 for the full dataset)")
     args = parser.parse_args()
     
     evaluate_hrl(args.checkpoint, args.num_videos)

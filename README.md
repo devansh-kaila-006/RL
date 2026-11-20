@@ -55,7 +55,51 @@ To execute the unified training routine across official UCF-101 action subsets a
 ```
 *Outputs real-time loss convergence, validation classification metrics, and preserves model weights to `data/`.*
 
-### B. Regenerating Visual Analytics & Evaluation Plots
+### B. Interactive Simulation & Active Hopping Demo
+To run the live step-by-step interactive simulation demonstrating the agent actively leaping over redundant frames, visualizing Q-value distributions, and comparing latency with the exhaustive sequential baseline:
+```powershell
+# Interactive CLI demo across any action class (e.g., Basketball, BenchPress, PlayingGuitar):
+.\.venv\Scripts\python.exe demo_phase1_simulation.py --class-name Basketball
+
+# Step-by-step interactive stepping with [Enter]:
+.\.venv\Scripts\python.exe demo_phase1_simulation.py --class-name BenchPress --interactive
+```
+*Saves an annotated visual trajectory plot to `Phase_1/figures/demo_simulation_trajectory.png` showing keyframes inspected vs. redundant frames vaulted.*
+
+### C. Demonstration Media (Animated GIFs & Showcase Video)
+High-definition media assets illustrating active RL hopping dynamics, policy diagnostics, multi-stream supervision, and comparative benchmarks:
+
+1. **Class-Specific Action Trajectories (Single Stream with Live HUD):**
+   * **Outdoor Athletics Active Hopping (Basketball):** `Phase_1/media/adaframe_basketball_demo.gif`
+   * **Indoor Kinematic Tracking (BenchPress):** `Phase_1/media/adaframe_benchpress_demo.gif`
+   * **Hand-Instrument Coordination (PlayingGuitar):** `Phase_1/media/adaframe_playingguitar_demo.gif`
+   * **Dynamic Ball Flight Dynamics (SoccerJuggling):** `Phase_1/media/adaframe_soccerjuggling_demo.gif`
+   * **Repetitive Ground Posture (PushUps):** `Phase_1/media/adaframe_pushups_demo.gif`
+
+2. **Comparative Benchmark Duels:**
+   * **Head-to-Head Duel (Naive Baseline vs. AdaFrame-RL):** `Phase_1/media/adaframe_side_by_side_comparison.gif`
+   * **Tri-Way Policy Ablation (Uniform Skip-4 vs. Random vs. AdaFrame-RL):** `Phase_1/media/adaframe_ablation_duel.gif`
+
+3. **Multi-Camera CCTV Grid (Phase 2 H-RL Preview):**
+   * **4-Stream CCTV Grid with Dynamic Budget Allocation:** `Phase_1/media/adaframe_multistream_cctv_grid.gif`
+
+4. **Under-the-Hood Neural Diagnostics (X-Ray View):**
+   * **GRU Latent State + Q-Values + Softmax Probability Morphing:** `Phase_1/media/adaframe_neural_xray_diagnostics.gif`
+
+5. **Cinematic Temporal Filmstrip Scanner:**
+   * **Horizontal Filmstrip with Laser Scanner & FLOP Counter:** `Phase_1/media/adaframe_filmstrip_vault_scanner.gif`
+
+6. **Multi-Class Action Montage:**
+   * **Fast-Paced 5-Class Summary Highlight Reel:** `Phase_1/media/adaframe_multiclass_montage.gif`
+
+7. **Academic Presentation Videos (.mp4):**
+   * **Flagship 1080p Full HD Academic Demo (86s, 8 Chapters):** `Phase_1/media/adaframe_phase1_detailed_1080p_demo.mp4`
+   * **Compact Quick Showcase (37s):** `Phase_1/media/adaframe_phase1_showcase.mp4`
+
+*(Regenerate the 1080p video via `.\.venv\Scripts\python.exe Phase_1\scripts\generate_detailed_hd_video.py`)*
+*(Regenerate all GIF types via `.\.venv\Scripts\python.exe Phase_1\scripts\generate_all_gif_types.py`)*
+
+### D. Regenerating Visual Analytics & Evaluation Plots
 All plotting and empirical verification scripts reside in our dedicated test archive:
 ```powershell
 .\.venv\Scripts\python.exe Phase_1\scripts\generate_all_visualizations_and_metrics.py
